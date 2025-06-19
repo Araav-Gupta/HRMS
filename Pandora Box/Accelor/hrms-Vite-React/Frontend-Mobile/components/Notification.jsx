@@ -1,258 +1,181 @@
-import React, { useEffect, useState } from 'react';
-import {
-    View,
-    Text,
-    TouchableOpacity,
-    StyleSheet,
-    Modal,
-    ScrollView,
-    Platform,
-    StatusBar
+import React, { useState } from 'react';
+import { 
+  View, 
+  Text, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Modal, 
+  ScrollView,
+  TouchableWithoutFeedback 
 } from 'react-native';
-import { Bell, X } from 'lucide-react-native';
-import { useAuth } from '../context/AuthContext';
-import { api } from '../services/api';
+import { Ionicons } from '@expo/vector-icons';
+import { useNotifications } from '../context/NotificationContext';
 
-const Notification = () => {
-    const { user } = useAuth();
-    const [notifications, setNotifications] = useState([]);
-    const [isOpen, setIsOpen] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState(null);
+const NotificationBell = () => {
+  const [isVisible, setIsVisible] = useState(false);
+  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
 
-
-    const fetchNotifications = async () => {
-        if (!user?.token) return;
-
-        setIsLoading(true);
-        setError(null);
-
-        try {
-            const response = await api.get('/notifications');
-            setNotifications(response.data);
-        } catch (err) {
-            console.error('Error fetching notifications:', err);
-            setError('Failed to load notifications');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        if (isOpen) {
-            fetchNotifications();
-        }
-    }, [isOpen, user?.token]);
-
-
-
-    const markAllAsRead = async () => {
-      if (unreadCount === 0) return;
-
-      try {
-          await api.put('/notifications/mark-all-as-read');
-          setNotifications(notifications.map(n => ({ ...n, read: true })));
-      } catch (err) {
-          console.error('Error marking all notifications as read:', err);
-      }
+  const handlePress = () => {
+    setIsVisible(true);
+    if (unreadCount > 0) {
+      markAllAsRead();
+    }
   };
 
-  const handleIconPress = () => {
-    setIsOpen(true);
-    if (!isOpen) {
-        fetchNotifications();
-        markAllAsRead();
-    }
+  const handleClose = () => {
+    setIsVisible(false);
+  };
+
+  return (
+    <View>
+      <TouchableOpacity onPress={handlePress} style={styles.iconButton}>
+        <Ionicons name="notifications-outline" size={24} color="#000" />
+        {unreadCount > 0 && (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      <Modal
+        visible={isVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={handleClose}
+      >
+        <TouchableWithoutFeedback onPress={handleClose}>
+          <View style={styles.modalOverlay} />
+        </TouchableWithoutFeedback>
+        
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Notifications</Text>
+            {unreadCount > 0 && (
+              <TouchableOpacity onPress={markAllAsRead}>
+                <Text style={styles.markAllText}>Mark all as read</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          
+          <ScrollView style={styles.notificationsList}>
+            {notifications.length === 0 ? (
+              <Text style={styles.emptyText}>No notifications</Text>
+            ) : (
+              notifications.map((notification) => (
+                <TouchableOpacity
+                  key={notification._id}
+                  style={[
+                    styles.notificationItem,
+                    !notification.read && styles.unreadNotification
+                  ]}
+                  onPress={() => {
+                    markAsRead(notification._id);
+                    // Handle notification press
+                  }}
+                >
+                  <Text style={[
+                    styles.notificationTitle,
+                    !notification.read && styles.unreadTitle
+                  ]}>
+                    {notification.title}
+                  </Text>
+                  <Text style={styles.notificationMessage}>
+                    {notification.message}
+                  </Text>
+                  <Text style={styles.notificationTime}>
+                    {new Date(notification.createdAt).toLocaleTimeString()}
+                  </Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+    </View>
+  );
 };
 
-const unreadCount = notifications.filter(n => !n.read).length;
+const styles = StyleSheet.create({
+  iconButton: {
+    padding: 10,
+    position: 'relative',
+  },
+  badge: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    backgroundColor: 'red',
+    borderRadius: 10,
+    width: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  badgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    padding: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  markAllText: {
+    color: '#007AFF',
+    fontSize: 16,
+  },
+  notificationsList: {
+    maxHeight: '100%',
+  },
+  notificationItem: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  unreadNotification: {
+    backgroundColor: '#f8f9fa',
+  },
+  notificationTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  unreadTitle: {
+    fontWeight: 'bold',
+  },
+  notificationMessage: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  notificationTime: {
+    fontSize: 12,
+    color: '#999',
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#999',
+    marginTop: 20,
+  },
+});
 
-    return (
-        <View style={styles.container}>
-          <TouchableOpacity 
-            onPress={handleIconPress}
-            style={styles.notificationButton}
-            accessibilityLabel="Notifications"
-          >
-            <View style={styles.bellContainer}>
-              <Bell size={24} color="#4B5563" />
-              {unreadCount > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </TouchableOpacity>
-    
-          <Modal
-            visible={isOpen}
-            animationType="slide"
-            transparent={true}
-            onRequestClose={() => setIsOpen(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContainer}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Notifications</Text>
-                  <TouchableOpacity 
-                    onPress={() => setIsOpen(false)}
-                    style={styles.closeButton}
-                  >
-                    <X size={24} color="#4B5563" />
-                  </TouchableOpacity>
-                </View>
-                
-                {isLoading ? (
-                  <View style={styles.loadingContainer}>
-                    <Text>Loading...</Text>
-                  </View>
-                ) : error ? (
-                  <View style={styles.errorContainer}>
-                    <Text style={styles.errorText}>{error}</Text>
-                    <TouchableOpacity 
-                      onPress={fetchNotifications}
-                      style={styles.retryButton}
-                    >
-                      <Text style={styles.retryButtonText}>Retry</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : notifications.length === 0 ? (
-                  <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>No notifications</Text>
-                  </View>
-                ) : (
-                  <ScrollView style={styles.notificationsList}>
-                    {notifications.map((notification) => (
-                      <View
-                        key={notification._id}
-                        style={[
-                          styles.notificationItem,
-                          !notification.read && styles.unreadNotification
-                        ]}
-                      >
-                        <Text style={styles.notificationMessage}>
-                          {notification.message}
-                        </Text>
-                        <Text style={styles.notificationTime}>
-                          {new Date(notification.createdAt).toLocaleString()}
-                        </Text>
-                      </View>
-                    ))}
-                  </ScrollView>
-                )}
-              </View>
-            </View>
-          </Modal>
-        </View>
-      );
-    };
-    
-    const styles = StyleSheet.create({
-      container: {
-        marginRight: 10,
-      },
-      notificationButton: {
-        padding: 8,
-        position: 'relative',
-      },
-      bellContainer: {
-        position: 'relative',
-      },
-      badge: {
-        position: 'absolute',
-        top: -5,
-        right: -5,
-        backgroundColor: '#EF4444',
-        borderRadius: 10,
-        width: 20,
-        height: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
-      },
-      badgeText: {
-        color: 'white',
-        fontSize: 10,
-        fontWeight: 'bold',
-      },
-      modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        justifyContent: 'flex-end',
-      },
-      modalContainer: {
-        backgroundColor: 'white',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        maxHeight: '80%',
-        paddingTop: 10,
-        paddingBottom: Platform.OS === 'ios' ? 30 : 20,
-      },
-      modalHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingVertical: 15,
-        borderBottomWidth: 1,
-        borderBottomColor: '#E5E7EB',
-      },
-      modalTitle: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: '#111827',
-      },
-      closeButton: {
-        padding: 5,
-      },
-      loadingContainer: {
-        padding: 20,
-        alignItems: 'center',
-      },
-      errorContainer: {
-        padding: 20,
-        alignItems: 'center',
-      },
-      errorText: {
-        color: '#EF4444',
-        marginBottom: 10,
-      },
-      retryButton: {
-        padding: 10,
-        backgroundColor: '#F3F4F6',
-        borderRadius: 5,
-      },
-      retryButtonText: {
-        color: '#4B5563',
-      },
-      emptyContainer: {
-        padding: 20,
-        alignItems: 'center',
-      },
-      emptyText: {
-        color: '#6B7280',
-      },
-      notificationsList: {
-        maxHeight: '100%',
-      },
-      notificationItem: {
-        padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#F3F4F6',
-      },
-      unreadNotification: {
-        backgroundColor: '#F9FAFB',
-      },
-      notificationMessage: {
-        fontSize: 14,
-        color: '#111827',
-        marginBottom: 4,
-      },
-      notificationTime: {
-        fontSize: 12,
-        color: '#6B7280',
-      },
-    });
-    
-    export default Notification;
+export default NotificationBell;

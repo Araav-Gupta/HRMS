@@ -88,12 +88,13 @@ const AuthProvider = ({ children }) => {
       loading, 
       error, 
       login, 
-      logout
+      logout,
       }}>
       {children}
     </AuthContext.Provider>
   );
 };
+const useAuth = () => React.useContext(AuthContext);
 
-export { AuthContext, AuthProvider };
+export { AuthContext, AuthProvider, useAuth };
 

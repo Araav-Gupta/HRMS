@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { rateLimit } from 'express-rate-limit';
-
+console.log('Socket configuration module loaded');
 // Socket configuration
 const SOCKET_CONFIG = {
   MAX_CONNECTIONS: 1000,
@@ -29,7 +29,7 @@ const socketRateLimiter = rateLimit({
 // Room cleanup
 const cleanupRooms = () => {
   const now = Date.now();
-  
+
   // Clean up empty rooms
   connectionTracker.rooms.forEach((room, roomId) => {
     if (room.size === 0 && now - room.lastActivity > SOCKET_CONFIG.ROOM_CLEANUP_INTERVAL) {
@@ -37,14 +37,14 @@ const cleanupRooms = () => {
       console.log(`Cleaned up empty room: ${roomId}`);
     }
   });
-  
+
   // Clean up old connections
   connectionTracker.connections.forEach((conn, connId) => {
     if (now - conn.lastActivity > SOCKET_CONFIG.ROOM_CLEANUP_INTERVAL) {
       connectionTracker.connections.delete(connId);
     }
   });
-  
+
   connectionTracker.lastCleanup = now;
 };
 
@@ -64,38 +64,89 @@ const initializeSocket = (server, allowedOrigins) => {
         }
       },
       methods: ['GET', 'POST'],
-      credentials: true,
+      credentials: true
     },
     maxHttpBufferSize: 1e8, // 100MB
     pingTimeout: 60000,
     pingInterval: 25000,
     allowEIO3: true,
-    transports: ['websocket', 'polling']
+    transports: ['websocket', 'polling'],
+    cookie: false,
+    serveClient: false,
+    allowUpgrades: true,
+    perMessageDeflate: {
+      threshold: 1024,
+      clientNoContextTakeover: true,
+    },
+    httpCompression: true
+  });
+
+  // Middleware for authentication
+  io.use((socket, next) => {
+    try {
+      const { userId } = socket.handshake.query;
+      if (!userId) {
+        console.error('No userId provided');
+        return next(new Error('Authentication error: No userId provided'));
+      }
+      
+      // Here you would typically verify the user's token or session
+      // For now, we'll just attach the userId to the socket
+      socket.userId = userId;
+      next();
+    } catch (error) {
+      console.error('Authentication error:', error);
+      next(new Error('Authentication failed'));
+    }
   });
 
   // Assign Socket.IO instance to global._io
   global._io = io;
-
-  // Mobile-specific handlers
-  io.on('connection', socket => {
+  
+  // Setup cleanup interval
+  const cleanupInterval = setInterval(cleanupRooms, SOCKET_CONFIG.ROOM_CLEANUP_INTERVAL);
+  
+  io.on('connection', (socket) => {
+    console.log('User connected:', socket.id, 'User ID:', socket.userId);
+    
     try {
-      console.log('User connected:', socket.id);
-      
       // Track connection
-      connectionTracker.connections.set(socket.id, {
+      const userConnections = {
         lastActivity: Date.now(),
-        userId: null,
+        userId: socket.userId,
         rooms: new Set()
+      };
+      
+      connectionTracker.connections.set(socket.id, userConnections);
+      
+      // Join user to their personal room
+      socket.join(`user:${socket.userId}`);
+      userConnections.rooms.add(`user:${socket.userId}`);
+      
+      // Handle disconnection
+      socket.on('disconnect', (reason) => {
+        console.log(`User ${socket.userId} (${socket.id}) disconnected:`, reason);
+        connectionTracker.connections.delete(socket.id);
       });
-
-      // Mobile connection handling
+      
+      // Handle errors
+      socket.on('error', (error) => {
+        console.error('Socket error:', error);
+      });
+      
+      // Handle custom events
       socket.on('mobile-connect', (deviceInfo) => {
         try {
-          console.log('Mobile device connected:', deviceInfo);
-          socket.join(`device:${deviceInfo.deviceId}`);
+          if (!deviceInfo?.deviceId) {
+            throw new Error('No deviceId provided');
+          }
+          const roomName = `device:${deviceInfo.deviceId}`;
+          socket.join(roomName);
+          userConnections.rooms.add(roomName);
+          console.log(`User ${socket.userId} joined device room:`, roomName);
         } catch (error) {
           console.error('Mobile connection error:', error);
-          socket.emit('error', 'Failed to connect mobile device');
+          socket.emit('error', { message: 'Failed to connect mobile device', error: error.message });
         }
       });
 
@@ -121,9 +172,9 @@ const initializeSocket = (server, allowedOrigins) => {
           conn.userId = userId;
           conn.rooms.add(userId);
           connectionTracker.rooms.get(userId).add(socket.id);
-          
+
           console.log(`User ${userId} joined room`);
-          
+
           // Mobile-specific handling
           if (socket.handshake.query.deviceId) {
             socket.join(`device:${socket.handshake.query.deviceId}`);
@@ -139,7 +190,7 @@ const initializeSocket = (server, allowedOrigins) => {
       socket.on('disconnect', (reason) => {
         try {
           console.log(`User disconnected: ${socket.id} (reason: ${reason})`);
-          
+
           const conn = connectionTracker.connections.get(socket.id);
           if (conn) {
             // Leave all rooms
@@ -150,7 +201,7 @@ const initializeSocket = (server, allowedOrigins) => {
                 room.delete(socket.id);
               }
             });
-            
+
             connectionTracker.connections.delete(socket.id);
           }
 

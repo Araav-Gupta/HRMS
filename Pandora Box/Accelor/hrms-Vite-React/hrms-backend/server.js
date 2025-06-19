@@ -35,23 +35,47 @@ app.get('/health', (req, res) => {
 // Initialize components
 const startServer = async () => {
   try {
+    // Initialize database connection
     const dbConnection = await connectDatabase();
-    const io = initializeSocket(server, allowedOrigins);
+    
+    // Initialize scheduled jobs
     const scheduledJobs = initializeScheduledJobs();
+    
+    // Initialize Socket.IO with CORS configuration
+    const io = initializeSocket(server, allowedOrigins);
     
     // Store the cleanup functions in app
     app.set('cleanupFunctions', {
       dbConnection: cleanupDatabase,
-      scheduledJobs: () => scheduledJobs.cleanup()
+      scheduledJobs: () => scheduledJobs.cleanup(),
+      socketCleanup: () => {
+        if (global._io) {
+          global._io.close();
+          console.log('Socket.IO server closed');
+        }
+      }
     });
     
+    // Register API routes
     registerRoutes(app);
-    console.log('routes registered');
+    console.log('API routes registered');
+    
     // Register shutdown handlers
     const shutdownStatus = registerShutdownHandlers(server, io, dbConnection, scheduledJobs);
     app.set('shutdownStatus', shutdownStatus);
     
-    server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    // Start the server
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`Socket.IO server initialized`);
+    });
+    
+    // Handle server errors
+    server.on('error', (error) => {
+      console.error('Server error:', error);
+      process.exit(1);
+    });
+    
   } catch (error) {
     console.error('Server startup error:', error);
     process.exit(1);

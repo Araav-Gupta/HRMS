@@ -1,8 +1,9 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { ActivityIndicator, View, StyleSheet, Text, Button } from 'react-native';
+import { ActivityIndicator, View, StyleSheet, Text, Button, BackHandler } from 'react-native';
 import { AuthProvider, AuthContext } from './context/AuthContext.jsx';
+import { NotificationProvider } from './context/NotificationContext';
 import LoginScreen from './screens/LoginScreen.jsx';
 import EmployeeScreen from './screens/Employee.jsx';
 import HODStack from './navigation/HODStack';
@@ -10,7 +11,11 @@ import HODStack from './navigation/HODStack';
 const Stack = createNativeStackNavigator();
 
 const AppContent = () => {
-  const { user, loading, error } = React.useContext(AuthContext);
+  const { user, loading, error, refreshAuth } = React.useContext(AuthContext);
+
+  const handleTryAgain = () => {
+    refreshAuth(); // Implement this in your AuthContext
+  };
 
   if (loading) {
     return (
@@ -25,59 +30,59 @@ const AppContent = () => {
     return (
       <View style={styles.errorContainer}>
         <Text style={styles.errorText}>{error.message}</Text>
-        <Button title="Try Again" onPress={() => window.location.reload()} />
+        <Button title="Try Again" onPress={handleTryAgain} />
       </View>
     );
   }
 
   return (
     <NavigationContainer>
-      <Stack.Navigator>
+      <Stack.Navigator
+        screenOptions={{
+          headerStyle: {
+            backgroundColor: '#6b21a8',
+          },
+          headerTintColor: '#fff',
+          headerTitleStyle: {
+            fontWeight: 'bold',
+          },
+        }}
+      >
         {!user ? (
           <Stack.Screen
             name="Login"
             component={LoginScreen}
-            options={{
-              headerShown: true,
-              headerTitle: 'Login',
-              headerStyle: { backgroundColor: '#6b21a8' },
-              headerTintColor: '#fff'
+            options={{ headerShown: true }}
+          />
+        ) : user.role === 'HOD' ? (
+          <Stack.Screen
+            name="HOD"
+            component={HODStack}
+            options={{ headerShown: false }}
+          />
+        ) : (
+          <Stack.Screen
+            name="Employee"
+            component={EmployeeScreen}
+            options={{ title: 'Employee Dashboard' ,
+              headerShown: false
             }}
           />
-        ) :
-          user.loginType === 'HOD' ? (
-            <Stack.Screen
-              name="HOD"
-              component={HODStack}
-              options={{ headerShown: false,headerTitle: 'HOD Dashboard',
-                headerStyle: { backgroundColor: '#6b21a8' },
-                headerTintColor: '#fff' }}
-            />
-          ) : (
-            <Stack.Screen
-              name="Employee"
-              component={EmployeeScreen}
-              options={{
-                headerShown: false,
-                  headerTitle: 'Employee Dashboard',
-                  headerStyle: { backgroundColor: '#6b21a8' },
-                  headerTintColor: '#fff'
-              }}
-            />
-          )
-        }
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );
 };
 
-export default function App() {
+const App = () => {
   return (
     <AuthProvider>
-      <AppContent />
+      <NotificationProvider>
+        <AppContent />
+      </NotificationProvider>
     </AuthProvider>
   );
-}
+};
 
 const styles = StyleSheet.create({
   loader: {
@@ -85,14 +90,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#fff',
-    padding: 20,
   },
   loadingText: {
     marginTop: 10,
     color: '#6b21a8',
-    fontSize: 16,
-  }
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#fff',
+  },
+  errorText: {
+    color: 'red',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
 });
 
-// Initialize token refresh when app starts
-// setupTokenRefresh();
+export default App;

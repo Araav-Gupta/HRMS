@@ -9,6 +9,7 @@ import ODForm from '../components/ODForm';
 import Attendance from '../components/Attendance';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigation, CommonActions } from '@react-navigation/native';
+import NotificationBell from '../components/Notification.jsx';
 
 const Drawer = createDrawerNavigator();
 
@@ -86,6 +87,7 @@ const EmployeeScreen = () => {
           headerTitle: 'Employee Dashboard',
           headerStyle: { backgroundColor: '#6b21a8' },
           headerTintColor: '#fff',
+          headerRight: () => <NotificationBell />,
           drawerIcon: ({ color }) => (
             <Ionicons name="speedometer" size={20} color={color} />
           )
@@ -98,6 +100,7 @@ const EmployeeScreen = () => {
           headerTitle: 'My Profile',
           headerStyle: { backgroundColor: '#6b21a8' },
           headerTintColor: '#fff',
+          headerRight: () => <NotificationBell />,
           drawerIcon: ({ color }) => (
             <Ionicons name="person" size={20} color={color} />
           )
@@ -110,6 +113,7 @@ const EmployeeScreen = () => {
           headerTitle: 'Leaves',
           headerStyle: { backgroundColor: '#6b21a8' },
           headerTintColor: '#fff',
+          headerRight: () => <NotificationBell />,
           drawerIcon: ({ color }) => (
             <Ionicons name="calendar" size={20} color={color} />
           )
@@ -122,6 +126,7 @@ const EmployeeScreen = () => {
           headerTitle: 'OD',
           headerStyle: { backgroundColor: '#6b21a8' },
           headerTintColor: '#fff',
+          headerRight: () => <NotificationBell />,
           drawerIcon: ({ color }) => (
             <Ionicons name="document" size={20} color={color} />
           )
@@ -134,6 +139,7 @@ const EmployeeScreen = () => {
           headerTitle: 'Attendance',
           headerStyle: { backgroundColor: '#6b21a8' },
           headerTintColor: '#fff',
+          headerRight: () => <NotificationBell />,
           drawerIcon: ({ color }) => (
             <Ionicons name="time" size={20} color={color} />
           )
