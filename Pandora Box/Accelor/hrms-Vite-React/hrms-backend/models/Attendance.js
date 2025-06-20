@@ -12,4 +12,6 @@ const attendanceSchema = new Schema({
   ot: { type: Number, default: 0 }, // Overtime in minutes
 }, { timestamps: true });
 
+attendanceSchema.index({ employeeId: 1, logDate: 1 }, { unique: true });
+
 export default model('Attendance', attendanceSchema);

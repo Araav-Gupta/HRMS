@@ -17,7 +17,8 @@ const leaveSchema = new Schema({
       'Paternity',
       'Compensatory',
       'Restricted Holidays',
-      'Leave Without Pay(LWP)'
+      'Leave Without Pay(LWP)',
+      'Emergency'
     ],
     required: true
   },
@@ -35,13 +36,14 @@ const leaveSchema = new Schema({
   },
 
   reason: { type: String, required: true },
-  chargeGivenTo: { type: String, required: true },
+  chargeGivenTo: { type: Schema.Types.ObjectId, ref: 'Employee', required: true },
   emergencyContact: { type: String, required: true },
 
   // Additional fields for specific leave types
   compensatoryEntryId: { type: Schema.Types.ObjectId, default: null },
   projectDetails: { type: String },
   restrictedHoliday: { type: String },
+  medicalCertificate: { type: mongoose.Schema.Types.ObjectId, ref: 'Uploads.files', default: null },
 
   status: {
     hod: { type: String, enum: ['Pending', 'Approved', 'Rejected'], default: 'Pending' },

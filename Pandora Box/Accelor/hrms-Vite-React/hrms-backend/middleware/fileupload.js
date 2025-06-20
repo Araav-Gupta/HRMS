@@ -11,11 +11,11 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     try {
       const isProfilePicture = file.fieldname === 'profilePicture';
-      const isJpeg = isProfilePicture && (file.mimetype === 'image/jpeg' || file.mimetype === 'image/jpg');
-      const isPdf = !isProfilePicture && file.mimetype === 'application/pdf';
+      const isMedicalCertificate = file.fieldname === 'medicalCertificate';
+      const isJpeg = (isProfilePicture || isMedicalCertificate) && (file.mimetype === 'image/jpeg' || file.mimetype === 'image/jpg');
+      const isPdf = (!isProfilePicture || isMedicalCertificate) && file.mimetype === 'application/pdf';
       if (!isJpeg && !isPdf) {
-        return cb(new Error(`Invalid file type for ${file.fieldname}. Only ${isProfilePicture ? 'JPEG/JPG images' : 'PDF files'} are allowed.`));
-      }
+        return cb(new Error(`Invalid file type for ${file.fieldname}. Only ${isProfilePicture ? 'JPEG/JPG images' : isMedicalCertificate ? 'JPEG/JPG images or PDF files' : 'PDF files'} are allowed.`));      }
       cb(null, true);
     } catch (err) {
       console.error('File filter error:', err);

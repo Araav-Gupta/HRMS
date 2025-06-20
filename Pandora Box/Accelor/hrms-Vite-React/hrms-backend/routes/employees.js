@@ -1,7 +1,7 @@
 import { Router } from 'express';
 const router = Router();
 import pkg from 'mongoose';
-const { connection, Types } = pkg;import { read, utils } from 'xlsx';
+const { connection, Types } = pkg; import { read, utils } from 'xlsx';
 import multer, { MulterError, memoryStorage } from 'multer';
 import Employee from '../models/Employee.js';
 import Department from '../models/Department.js';
@@ -151,16 +151,68 @@ router.get('/', auth, role(['Admin', 'CEO']), async (req, res) => {
   }
 });
 
-// Get employees in HOD's department
-router.get('/department', auth, role(['HOD']), async (req, res) => {
+// Get employees in the same department, excluding those assigned to overlapping leaves
+router.get('/department', auth, role(['HOD', 'Employee']), async (req, res) => {
   try {
-    const { employeeId } = req.user;
-    const hod = await Employee.findOne({ employeeId }).populate('department');
-    if (!hod?.department?._id) {
-      return res.status(400).json({ message: 'HOD department not found' });
+    const { id, loginType } = req.user;
+    const { startDate, endDate } = req.query;
+    const user = await Employee.findById(id).populate('department');
+    if (!user?.department?._id) {
+      return res.status(400).json({ message: 'User department not found' });
     }
-    const employees = await Employee.find({ department: hod.department._id }).populate('department reportingManager');
-    console.log('Fetching department employees for HOD:', hod.department._id);
+
+    const query = {
+      department: user.department._id,
+      _id: { $ne: id }, // Exclude logged-in user
+    };
+    if (loginType === 'Employee') {
+      query.loginType = { $ne: 'HOD' }; // Exclude HODs for regular employees
+    }
+    let excludedEmployeeIds = [];
+    if (startDate && endDate) {
+      const parsedStart = new Date(startDate);
+      const parsedEnd = new Date(endDate);
+
+      if (isNaN(parsedStart.getTime()) || isNaN(parsedEnd.getTime())) {
+        return res.status(400).json({ message: 'Invalid date format' });
+      }
+      if (parsedEnd < parsedStart) {
+        return res.status(400).json({ message: 'End date must be after start date' });
+      }
+
+      const overlappingLeaves = await Leave.find({
+        $or: [
+          {
+            'fullDay.from': { $lte: parsedEnd },
+            'fullDay.to': { $gte: parsedStart },
+            $or: [
+              { 'status.hod': { $in: ['Pending', 'Approved'] } },
+              { 'status.ceo': { $in: ['Pending', 'Approved'] } },
+            ],
+          },
+          {
+            'halfDay.date': { $gte: parsedStart, $lte: parsedEnd },
+            $or: [
+              { 'status.hod': { $in: ['Pending', 'Approved'] } },
+              { 'status.ceo': { $in: ['Pending', 'Approved'] } },
+            ],
+          },
+        ],
+      }).select('chargeGivenTo');
+
+      excludedEmployeeIds = overlappingLeaves
+        .map((leave) => leave.chargeGivenTo?.toString())
+        .filter((id) => id);
+    }
+
+    if (excludedEmployeeIds.length > 0) {
+      query._id = { ...query._id, $nin: excludedEmployeeIds };
+    }
+
+    const employees = await Employee.find(query)
+      .select('_id name employeeId')
+      .populate('department', 'name');
+    console.log('Fetching department employees for:', loginType, user.department._id);
     console.log('Employees found:', employees.length);
     res.json(employees);
   } catch (err) {
@@ -288,7 +340,7 @@ router.post('/', auth, role(['Admin']), ensureGfs, ensureDbConnection, checkForF
       files.aadharCard ? files.aadharCard[0].id : null,
       files.bankPassbook ? files.bankPassbook[0].id : null,
       files.medicalCertificate ? files.medicalCertificate[0].id : null,
-      files.backgroundVerification ? files.backgroundVerification[0].id : null
+      files.backgroundVerification ? files.backgroundVerification[0].id : null,
     ].filter(id => id !== null);
 
     const employee = new Employee({
@@ -333,7 +385,7 @@ router.post('/', auth, role(['Admin']), ensureGfs, ensureDbConnection, checkForF
         bankName,
         bankBranch,
         accountNumber,
-        ifscCode
+        ifscCode,
       } : {},
       locked: true,
       basicInfoLocked: true,
@@ -342,7 +394,7 @@ router.post('/', auth, role(['Admin']), ensureGfs, ensureDbConnection, checkForF
       documentsLocked: true,
       paymentLocked: true,
       paidLeaves: 12,
-      unpaidLeavesTaken: 0
+      unpaidLeavesTaken: 0,
     });
 
     const newEmployee = await employee.save();
@@ -352,7 +404,7 @@ router.post('/', auth, role(['Admin']), ensureGfs, ensureDbConnection, checkForF
       await Audit.create({
         action: 'create_employee',
         user: req.user?.id || 'unknown',
-        details: `Created employee ${employeeId}`
+        details: `Created employee ${employeeId}`,
       });
     } catch (auditErr) {
       console.warn('Audit logging failed:', auditErr.message);
@@ -398,14 +450,14 @@ router.put('/:id', auth, ensureGfs, ensureDbConnection, checkForFiles, async (re
       'motherName', 'mobileNumber', 'permanentAddress', 'currentAddress', 'aadharNumber',
       'bloodGroup', 'gender', 'maritalStatus', 'spouseName', 'emergencyContactName', 'emergencyContactNumber',
       'dateOfJoining', 'reportingManager', 'status', 'dateOfResigning', 'employeeType', 'probationPeriod', 'confirmationDate',
-      'referredBy', 'loginType'
+      'referredBy', 'loginType',
     ];
     const positionFields = ['designation', 'location', 'department'];
     const statutoryFields = ['panNumber', 'pfNumber', 'uanNumber', 'esiNumber'];
     const documentFields = [
       'tenthTwelfthDocs', 'graduationDocs', 'postgraduationDocs', 'experienceCertificate',
       'salarySlips', 'panCard', 'aadharCard', 'bankPassbook', 'medicalCertificate',
-      'backgroundVerification', 'profilePicture'
+      'backgroundVerification', 'profilePicture',
     ];
     const paymentFields = ['paymentType', 'bankName', 'bankBranch', 'accountNumber', 'ifscCode'];
 
@@ -453,7 +505,7 @@ router.put('/:id', auth, ensureGfs, ensureDbConnection, checkForFiles, async (re
       return res.status(400).json({ message: 'Mobile Number must be 10 digits' });
     }
     if (updates.password && updates.password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters' });
+      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
     }
     if (updates.status === 'Resigned' && !updates.dateOfResigning) {
       return res.status(400).json({ message: 'Date of Resigning is required for Resigned status' });
@@ -506,7 +558,7 @@ router.put('/:id', auth, ensureGfs, ensureDbConnection, checkForFiles, async (re
     const docFields = [
       'tenthTwelfthDocs', 'graduationDocs', 'postgraduationDocs', 'experienceCertificate',
       'salarySlips', 'panCard', 'aadharCard', 'bankPassbook', 'medicalCertificate',
-      'backgroundVerification'
+      'backgroundVerification',
     ];
     const newDocumentIds = docFields
       .map(field => {
@@ -538,7 +590,7 @@ router.put('/:id', auth, ensureGfs, ensureDbConnection, checkForFiles, async (re
         bankName: updates.bankName,
         bankBranch: updates.bankBranch,
         accountNumber: updates.accountNumber,
-        ifscCode: updates.ifscCode
+        ifscCode: updates.ifscCode,
       } : {};
     }
 
@@ -552,7 +604,7 @@ router.put('/:id', auth, ensureGfs, ensureDbConnection, checkForFiles, async (re
         action: 'update',
         user: req.user?.id || 'unknown',
         dept: 'HR',
-        details: `Updated employee ${employee.employeeId}`
+        details: `Updated employee ${employee.employeeId}`,
       });
     } catch (auditErr) {
       console.warn('Audit logging failed:', auditErr.message);
@@ -598,9 +650,11 @@ router.delete('/:id', auth, role(['Admin']), ensureGfs, async (req, res) => {
 
     try {
       await Audit.create({
-        action: 'delete_employee',
-        user: req.user?.id || 'unknown',
-        details: `Deleted employee ${employee.employeeId}`
+        type: 'delete_employee',
+        action: 'delete',
+        user: req.user.id || 'unknown',
+        dept: 'HR',
+        details: `Deleted employee ${employee.employeeId}`,
       });
     } catch (auditErr) {
       console.warn('Audit logging failed:', auditErr.message);
@@ -658,7 +712,7 @@ router.patch('/:id/lock', auth, role(['Admin']), async (req, res) => {
       await Audit.create({
         action: 'lock_unlock_employee',
         user: req.user?.id || 'unknown',
-        details: `Toggled lock for employee ${employee.employeeId} to ${employee.locked}`
+        details: `Toggled lock for employee ${employee.employeeId} to ${employee.locked}`,
       });
     } catch (auditErr) {
       console.warn('Audit logging failed:', auditErr.message);
@@ -693,7 +747,7 @@ router.patch('/:id/lock-section', auth, role(['Admin']), async (req, res) => {
       await Audit.create({
         action: 'lock_unlock_section',
         user: req.user?.id || 'unknown',
-        details: `Toggled ${section} lock for employee ${employee.employeeId} to ${employee[lockField]}`
+        details: `Toggled ${section} lock for employee ${employee.employeeId} to ${employee[lockField]}`,
       });
     } catch (auditErr) {
       console.warn('Audit logging failed:', auditErr.message);
@@ -796,7 +850,7 @@ router.post(
               dateOfResigning: row.status === 'Resigned' ? parseExcelDate(row.dateOfResigning) : null,
               employeeType: row.status === 'Working' ? row.employeeType : null,
               probationPeriod: row.status === 'Working' && row.employeeType === 'Probation' ? row.probationPeriod : null,
-              confirmationDate: row.status === 'Working' && row.employeeType === 'Probation' ? parseExcelDate(row.dateOfConfirmationDate) : null,
+              confirmationDate: row.status === 'Working' && row.employeeType === 'Probation' ? parseExcelDate(row.confirmationDate) : null,
               reportingManager: reportingManagerId,
               status: row.status || '',
               referredBy: row.referredBy || '',
@@ -844,9 +898,61 @@ router.post(
         errors: results.filter(r => r.error)
       });
     } catch (err) {
-      res.status(500).json({ message: err.message });
+      console.error('Error processing Excel upload:', err.message);
+      res.status(500).json({ message: 'Server error', error: err.message });
     }
+  });
+
+// Toggle Emergency Leave Permission (HOD for subordinates, CEO for HODs)
+router.patch('/:id/emergency-leave-permission', auth, role(['Admin', 'HOD', 'CEO']), async (req, res) => {
+  try {
+    const employee = await Employee.findById(req.params.id);
+    if (!employee) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+
+    const user = await Employee.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Authorization checks
+    if (req.user.role === 'HOD') {
+      // HOD can only toggle for non-HOD employees in their department
+      if (employee.loginType !== 'Employee' || employee.department.toString() !== user.department.toString()) {
+        return res.status(403).json({ message: 'Not authorized to toggle Emergency Leave permission for this employee' });
+      }
+    } else if (req.user.role === 'CEO') {
+      // CEO can only toggle for HODs
+      if (employee.loginType !== 'HOD') {
+        return res.status(400).json({ message: 'CEO can only toggle Emergency Leave permission for HODs' });
+      }
+    }
+
+    // Toggle the canApplyEmergencyLeave field
+    employee.canApplyEmergencyLeave = !employee.canApplyEmergencyLeave;
+    const updatedEmployee = await employee.save();
+    const populatedEmployee = await Employee.findById(updatedEmployee._id).populate('department reportingManager');
+
+    console.log(`Emergency Leave permission for employee ${employee.employeeId} toggled to: ${updatedEmployee.canApplyEmergencyLeave}`);
+
+    // Audit logging
+    try {
+      await Audit.create({
+        action: 'toggle_emergency_leave_permission',
+        user: req.user.id || 'unknown',
+        details: `Toggled Emergency Leave permission for employee ${employee.employeeId} to ${employee.canApplyEmergencyLeave}`,
+      });
+
+    } catch (auditErr) {
+      console.warn('Audit logging failed:', auditErr.message);
+    }
+
+    res.json(populatedEmployee);
+  } catch (err) {
+    console.error('Error toggling Emergency Leave permission:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
-);
+});
 
 export default router;

@@ -48,9 +48,9 @@ router.post('/', auth, role(['Employee', 'HOD', 'Admin']), async (req, res) => {
       name: user.name,
       designation: user.designation,
       department: user.department,
-      dateOut: new Date(dateOut),
+      dateOut,
       timeOut,
-      dateIn: new Date(dateIn),
+      dateIn,
       timeIn,
       purpose,
       placeUnitVisit,
@@ -120,7 +120,7 @@ router.put('/:id/approve', auth, role(['HOD', 'CEO', 'Admin']), async (req, res)
     }
 
     od.status[currentStage] = status;
-    
+
     // Save remarks if provided
     if (req.body.remarks) {
       od.remarks = req.body.remarks;
@@ -135,101 +135,130 @@ router.put('/:id/approve', auth, role(['HOD', 'CEO', 'Admin']), async (req, res)
       const ceo = await Employee.findOne({ loginType: 'CEO' });
       if (ceo) {
         await Notification.create({
-          userId: ceo.employeeId,
-          message: `OD request from ${od.name} awaiting your approval`,
+          userId: ceo.employeeId, message: `OD request from ${od.name} awaiting CEO approval`
         });
-        if (global._io) global._io.to(ceo.employeeId).emit('notification', { message: `OD request from ${od.name} awaiting your approval` });
-      }
-    }
+        if (global._io) global._io.to(ceo.employeeId).emit('notification', { message: `OD request from ${od.name} awaiting CEO approval` });
+      } else if (status === 'Approved' && currentStage === 'ceo') {
 
-    if (status === 'Approved' && currentStage === 'ceo') {
-      od.status.admin = 'Pending';
-      const admin = await Employee.findOne({ loginType: 'Admin' });
-      if (admin) {
+        od.status.admin = 'Pending';
+        const admin = await Employee.findOne({ loginType: 'Admin' });
+        if (admin) {
+          await Notification.create({ userId: admin.employeeId, message: `OD request from ${od.name} awaiting Admin acknowledgment` });
+          if (global._io) global._io.to(admin.employeeId).emit('notification', { message: `OD request from ${od.name} awaiting Admin acknowledgment` });
+        }
+      }}
+
+      if (status === 'Acknowledged' && currentStage === 'admin') {
         await Notification.create({
-          userId: admin.employeeId,
-          message: `OD request from ${od.name} awaiting your acknowledgment`,
+          userId: od.employee.employeeId,
+          message: `Your OD request has been acknowledged by Admin`,
         });
-        if (global._io) global._io.to(admin.employeeId).emit('notification', { message: `OD request from ${od.name} awaiting your acknowledgment` });
+        if (global._io) global._io.to(od.employee.employeeId).emit('notification', { message: `Your OD request has been acknowledged by Admin` });
       }
+
+      if (status === 'Rejected') {
+        await Notification.create({
+          userId: od.employee.employeeId,
+          message: `Your OD request was rejected by ${currentStage.toUpperCase()}`,
+        });
+        if (global._io) global._io.to(od.employee.employeeId).emit('notification', { message: `Your OD request was rejected by ${currentStage.toUpperCase()}` });
+      }
+
+      await od.save();
+
+      await Audit.create({ user: user.employeeId, action: `${status} OD`, details: `${status} OD request for ${od.name}` });
+
+      const employee = await Employee.findById(od.employee);
+      if (employee) {
+        await Notification.create({ userId: employee.employeeId, message: `Your OD request has been ${status.toLowerCase()} by ${currentStage.toUpperCase()}` });
+        if (global._io) global._io.to(employee.employeeId).emit('notification', { message: `Your OD request has been ${status.toLowerCase()} by ${currentStage.toUpperCase()}` });
+      }
+
+      res.json({ message: `OD ${status.toLowerCase()} successfully`, od });
+    } catch (err) {
+      console.error('OD approval error:', err.stack);
+      res.status(500).json({ message: 'Server error', error: err.message });
     }
+  });
 
-    if (status === 'Acknowledged' && currentStage === 'admin') {
-      await Notification.create({
-        userId: od.employee.employeeId,
-        message: `Your OD request has been acknowledged by Admin`,
-      });
-      if (global._io) global._io.to(od.employee.employeeId).emit('notification', { message: `Your OD request has been acknowledged by Admin` });
-    }
-
-    if (status === 'Rejected') {
-      await Notification.create({
-        userId: od.employee.employeeId,
-        message: `Your OD request was rejected by ${currentStage.toUpperCase()}`,
-      });
-      if (global._io) global._io.to(od.employee.employeeId).emit('notification', { message: `Your OD request was rejected by ${currentStage.toUpperCase()}` });
-    }
-
-    await od.save();
-
-    await Audit.create({
-      user: user.employeeId,
-      action: `${status} OD`,
-      details: `${status} OD request for ${od.name} by ${currentStage.toUpperCase()}`,
-    });
-
-    res.json({ message: `OD ${status.toLowerCase()} successfully`, od });
-  } catch (err) {
-    console.error('OD approval error:', err.stack);
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
-});
-
-// Get ODs (unchanged)
+// Get ODs
 router.get('/', auth, async (req, res) => {
   try {
-    const { status, fromDate, toDate, page = 1, limit = 10 } = req.query;
     const user = await Employee.findById(req.user.id);
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: 'Employee not found' });
     }
 
-    const query = {};
-    if (status && status !== 'all') {
-      query.$or = [
-        { 'status.hod': status },
-        { 'status.ceo': status },
-        { 'status.admin': status },
-      ];
+    let query = {};
+    const {
+      employeeId,
+      departmentId,
+      status,
+      fromDate,
+      toDate,
+      page = 1,
+      limit = 10
+    } = req.query;
+
+    if (employeeId) {
+      if (!/^[A-Za-z0-9]+$/.test(employeeId)) {
+        return res.status(400).json({ message: 'Invalid Employee ID format' });
+      }
+      const employee = await Employee.findOne({ employeeId });
+      if (!employee) {
+        return res.status(404).json({ message: 'Employee not found' });
+      }
+      query.employeeId = employeeId;
     }
-    if (fromDate) query.dateOut = { $gte: new Date(fromDate) };
-    if (toDate) query.dateIn = { $lte: new Date(toDate) };
+
+    if (departmentId && departmentId !== 'all') {
+      const department = await Department.findById(departmentId);
+      if (!department) {
+        return res.status(404).json({ message: 'Department not found' });
+      }
+      query.department = departmentId;
+    }
 
     if (req.user.role === 'Employee') {
-      query.employee = req.user.id;
+      query.employeeId = user.employeeId;
     } else if (req.user.role === 'HOD') {
       query.department = user.department;
     }
 
+    if (status && status !== 'all') {
+      query.$or = [
+        { 'status.hod': status },
+        { 'status.ceo': status },
+        { 'status.admin': status }
+      ];
+    }
+
+    if (fromDate) {
+      const startDate = new Date(fromDate);
+      startDate.setHours(0, 0, 0, 0);
+      query.dateOut = { $gte: startDate };
+    }
+
+    if (toDate) {
+      const endDate = new Date(toDate);
+      endDate.setHours(23, 59, 59, 999);
+      query.dateIn = { $lte: endDate };
+    }
+
+    const total = await OD.countDocuments(query);
     const odRecords = await OD.find(query)
       .populate('employee', 'name designation remarks')
       .populate('department', 'name')
+      .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
-      .limit(parseInt(limit))
-      .sort({ createdAt: -1 });
+      .limit(parseInt(limit));
 
-    const total = await OD.countDocuments(query);
-
-    res.json({
-      odRecords,
-      total,
-      page: parseInt(page),
-      limit: parseInt(limit),
-    });
+    res.json({ odRecords, total });
   } catch (err) {
     console.error('Fetch ODs error:', err.stack);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
+
 
 export default router;
